@@ -1,16 +1,14 @@
 import { useEffect, useRef } from "react";
 import PropTypes from "prop-types";
 
-// Zona e mesazheve: header me status, lista e mesazheve dhe indikatori i shkrimit
-export function MessageArea({ activeConv, messages, loading, isTyping }) {
+export function MessageArea({ activeConv, messages, loading, isTyping, isOnline }) {
   const bottomRef = useRef(null);
 
-  // Shkun automatikisht ne fund kur vijn mesazhe te reja ose nis shkrimit
+  // Auto-scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
 
-  // Nese nuk ka bisede aktive, trego udhezim
   if (!activeConv) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
@@ -26,7 +24,7 @@ export function MessageArea({ activeConv, messages, loading, isTyping }) {
 
   return (
     <>
-      {/* Header: avatar, emer dhe status online/shkrimit */}
+      {/* Header */}
       <div className="flex items-center gap-3 px-6 py-4"
         style={{ borderBottom: "1px solid var(--border-subtle)", background: "rgba(255,255,255,0.01)" }}>
         <div className="relative">
@@ -34,33 +32,31 @@ export function MessageArea({ activeConv, messages, loading, isTyping }) {
             style={{ background: "linear-gradient(135deg, #0a2545, #1a4a8a)", color: "var(--gold-light)", border: "1px solid var(--border-subtle)" }}>
             {activeConv.initials}
           </div>
-          {activeConv.online && (
+          {isOnline && (
             <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2"
               style={{ background: "var(--online)", borderColor: "var(--bg-primary)" }} />
           )}
         </div>
         <div className="flex-1">
           <p className="font-medium" style={{ color: "var(--text-primary)" }}>{activeConv.name}</p>
-          {/* Tregon "typing..." nese po shkruan, "Active now" nese online, "Offline" nese jo */}
-          <p className="text-xs" style={{ color: activeConv.online ? "var(--online)" : "var(--text-muted)" }}>
-            {isTyping ? "typing..." : activeConv.online ? "Active now" : "Offline"}
+          <p className="text-xs" style={{ color: isOnline ? "var(--online)" : "var(--text-muted)" }}>
+            {isTyping ? "typing…" : isOnline ? "● Active now" : "Offline"}
           </p>
         </div>
       </div>
 
-      {/* Zona e mesazheve me scroll */}
+      {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-6 flex flex-col gap-1">
         {loading ? (
           <div className="flex items-center justify-center h-full">
-            <p className="text-sm" style={{ color: "var(--text-muted)" }}>Loading...</p>
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>Loading…</p>
           </div>
         ) : messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <p className="text-sm" style={{ color: "var(--text-muted)" }}>No messages yet. Say hello!</p>
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>No messages yet. Say hello! 👋</p>
           </div>
         ) : (
           <>
-            {/* Ndarese me daten "Today" */}
             <div className="relative flex items-center justify-center my-4">
               <div className="absolute left-0 right-0 h-px" style={{ background: "var(--border-subtle)" }} />
               <span className="relative px-3 text-xs"
@@ -69,10 +65,8 @@ export function MessageArea({ activeConv, messages, loading, isTyping }) {
               </span>
             </div>
 
-            {/* Rendit mesazhet: te vetit djathtas (own), te tjereve majtas */}
             {messages.map((msg) => (
               <div key={msg.id} className={`flex gap-2 items-end mb-1 ${msg.own ? "flex-row-reverse" : ""}`}>
-                {/* Avatar shfaqet vetem per mesazhet e te tjereve */}
                 {!msg.own && (
                   <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0"
                     style={{ background: "linear-gradient(135deg, #0a2545, #1a4a8a)", color: "var(--gold-light)" }}>
@@ -80,7 +74,6 @@ export function MessageArea({ activeConv, messages, loading, isTyping }) {
                   </div>
                 )}
                 <div>
-                  {/* Flluska e mesazhit me stil te ndryshëm per mesazhet e veta */}
                   <div className={`max-w-xs px-4 py-2.5 text-sm leading-relaxed ${msg.own ? "rounded-2xl rounded-br-sm" : "rounded-2xl rounded-bl-sm"}`}
                     style={msg.own ? {
                       background: "linear-gradient(135deg, #0d3570, #1a4a8a)",
@@ -102,7 +95,7 @@ export function MessageArea({ activeConv, messages, loading, isTyping }) {
               </div>
             ))}
 
-            {/* Indikator animuar kur perdoruesi tjeter po shkruan */}
+            {/* Typing indicator */}
             {isTyping && (
               <div className="flex gap-2 items-end mb-1">
                 <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0"
@@ -111,7 +104,6 @@ export function MessageArea({ activeConv, messages, loading, isTyping }) {
                 </div>
                 <div className="px-4 py-3 rounded-2xl rounded-bl-sm flex gap-1 items-center"
                   style={{ background: "rgba(255,255,255,0.05)", border: "1px solid var(--border-subtle)" }}>
-                  {/* Tre pika te animuara qe tregojne shkrimin */}
                   {[0, 1, 2].map((i) => (
                     <span key={i}
                       className="w-1.5 h-1.5 rounded-full"
@@ -125,11 +117,9 @@ export function MessageArea({ activeConv, messages, loading, isTyping }) {
             )}
           </>
         )}
-        {/* Element referenc per scroll automatik ne fund */}
         <div ref={bottomRef} />
       </div>
 
-      {/* Animacioni CSS per pikat e shkrimit */}
       <style>{`
         @keyframes bounce {
           0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
@@ -145,4 +135,5 @@ MessageArea.propTypes = {
   messages:   PropTypes.array.isRequired,
   loading:    PropTypes.bool,
   isTyping:   PropTypes.bool,
+  isOnline:   PropTypes.bool,
 };
