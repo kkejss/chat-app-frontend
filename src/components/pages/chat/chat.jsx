@@ -235,6 +235,7 @@ export default function Chat() {
           messages={messages}
           loading={loadingMsgs}
           isTyping={isTyping}
+          isOnline={activeConv ? onlineUsers.has(activeConv.otherId) : false}
         />
         <ChatInput
           onSend={handleSend}
