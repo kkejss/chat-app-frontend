@@ -23,14 +23,16 @@ export default function Chat() {
   const [searchParams, setSearchParams]     = useSearchParams();
   const currentUserId = localStorage.getItem("userId");
 
-  // Ref per te pasur biseden aktive gjithnje aktuale brenda socket handler-ave
-  const activeConvRef = useRef(activeConv);
+  // Ref-e per te pasur gjithnje vlerat aktuale brenda socket handler-ave
+  const activeConvRef   = useRef(activeConv);
+  const conversationsRef = useRef(conversations);
+
   useEffect(() => { activeConvRef.current = activeConv; }, [activeConv]);
+  useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
 
   // -- Ndihmes: shnderton biseden e paperpunuar nga API ne forme te perdorshem nga UI --
 
   function normalizeConv(conv) {
-    // Gjen perdoruesin tjeter (jo current user) per te shfaqur emrin e tij
     const other = conv.participants?.find((p) => p._id !== currentUserId) || conv.participants?.[0];
     const firstName = other?.firstName || "User";
     const lastName  = other?.lastName  || "";
@@ -45,21 +47,79 @@ export default function Chat() {
                   ? new Date(conv.lastMessage.createdAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
                   : "",
       unread:   0,
-      online:   onlineUsers.has(other?._id),
+      online:   false,
       otherId:  other?._id,
     };
   }
 
-  // Shnderton mesazhin nga API ne forme te perdorshem nga UI
   function normalizeMsg(msg) {
     return {
       id:   msg._id,
       text: msg.content,
-      // Kontrollon nese mesazhi eshte i userit aktual
       own:  msg.sender?._id === currentUserId || msg.sender === currentUserId,
       time: new Date(msg.createdAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
     };
   }
+
+  // -- Konfiguron socket-in dhe event listener-at --
+  // Behet nje here ne mount dhe mbetet aktiv per gjithe jeten e komponentit
+
+  useEffect(() => {
+    // Lidh socket-in (ose riperdor ate ekzistues)
+    const socket = connectSocket();
+    if (!socket) return;
+
+    const handleMessageNew = ({ conversationId, message }) => {
+      // Shto mesazhin ne pamje nese kjo bisede eshte aktive
+      if (activeConvRef.current?.id === conversationId) {
+        setMessages((prev) => {
+          // Mos shto duplikate (optimistic message zevendesohet)
+          const exists = prev.some((m) => m.id === message._id);
+          if (exists) return prev;
+          // Largo mesazhin optimist dhe shto ate realen
+          const filtered = prev.filter((m) => !m.id.startsWith("opt-"));
+          return [...filtered, normalizeMsg(message)];
+        });
+      }
+      // Perditeso lastMsg ne listen e bisedave
+      setConversations((prev) =>
+        prev.map((c) =>
+          c._id === conversationId
+            ? { ...c, lastMessage: { content: message.content, createdAt: message.createdAt } }
+            : c
+        )
+      );
+    };
+
+    const handleUserOnline  = ({ userId }) => setOnlineUsers((s) => new Set([...s, userId]));
+    const handleUserOffline = ({ userId }) => setOnlineUsers((s) => { const n = new Set(s); n.delete(userId); return n; });
+    const handleTypingStart = ({ userId }) => setTypingUsers((s) => new Set([...s, userId]));
+    const handleTypingStop  = ({ userId }) => setTypingUsers((s) => { const n = new Set(s); n.delete(userId); return n; });
+
+    // Kur socket rilidhет pas shkepitjes, ribashkohu ne dhomen aktive
+    const handleReconnect = () => {
+      console.log("[Socket] Reconnected — rejoining active room");
+      if (activeConvRef.current?.id) {
+        joinConversation(activeConvRef.current.id);
+      }
+    };
+
+    socket.on("message:new",   handleMessageNew);
+    socket.on("user:online",   handleUserOnline);
+    socket.on("user:offline",  handleUserOffline);
+    socket.on("typing:start",  handleTypingStart);
+    socket.on("typing:stop",   handleTypingStop);
+    socket.on("reconnect",     handleReconnect);
+
+    return () => {
+      socket.off("message:new",  handleMessageNew);
+      socket.off("user:online",  handleUserOnline);
+      socket.off("user:offline", handleUserOffline);
+      socket.off("typing:start", handleTypingStart);
+      socket.off("typing:stop",  handleTypingStop);
+      socket.off("reconnect",    handleReconnect);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // -- Ngarkon bisedat kur faqja hapet per here te pare --
 
@@ -82,55 +142,7 @@ export default function Chat() {
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // -- Konfiguron event listener-at e Socket.io --
-
-  useEffect(() => {
-    // Rilidhja e socket-it nese faqja u rifreskua dhe socket-i u shkepute
-    let socket = getSocket();
-    if (!socket || !socket.connected) {
-      socket = connectSocket();
-    }
-    if (!socket) return;
-
-    // Shton mesazhin e ri ne pamje nese biseda eshte aktive, perditeson lastMsg gjithsesi
-    const handleMessageNew = ({ conversationId, message }) => {
-      if (activeConvRef.current?.id === conversationId) {
-        setMessages((prev) => [...prev, normalizeMsg(message)]);
-      }
-      setConversations((prev) =>
-        prev.map((c) =>
-          c._id === conversationId
-            ? { ...c, lastMessage: { content: message.content, createdAt: message.createdAt } }
-            : c
-        )
-      );
-    };
-
-    // Perditeson listen e perdoruesve online/offline
-    const handleUserOnline  = ({ userId }) => setOnlineUsers((s) => new Set([...s, userId]));
-    const handleUserOffline = ({ userId }) => setOnlineUsers((s) => { const n = new Set(s); n.delete(userId); return n; });
-
-    // Menaxhon indikatorin e shkrimit
-    const handleTypingStart = ({ userId }) => setTypingUsers((s) => new Set([...s, userId]));
-    const handleTypingStop  = ({ userId }) => setTypingUsers((s) => { const n = new Set(s); n.delete(userId); return n; });
-
-    socket.on("message:new",   handleMessageNew);
-    socket.on("user:online",   handleUserOnline);
-    socket.on("user:offline",  handleUserOffline);
-    socket.on("typing:start",  handleTypingStart);
-    socket.on("typing:stop",   handleTypingStop);
-
-    // Pastron event listener-at kur komponenti shkatarrohet (cleanup)
-    return () => {
-      socket.off("message:new",  handleMessageNew);
-      socket.off("user:online",  handleUserOnline);
-      socket.off("user:offline", handleUserOffline);
-      socket.off("typing:start", handleTypingStart);
-      socket.off("typing:stop",  handleTypingStop);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // -- Zgjedh nje bisede: e normalizon, bashkohet ne socket room dhe ngarkon mesazhet --
+  // -- Zgjedh nje bisede --
 
   const handleSelectConv = useCallback(async (conv, skipUrlUpdate = false) => {
     const normalized = normalizeConv(conv);
@@ -138,11 +150,11 @@ export default function Chat() {
     setMessages([]);
     setLoadingMsgs(true);
 
-    // Perditeson URL me ?conv=id (vetem kur klikon nga lista, jo nga kerkimi)
     if (!skipUrlUpdate) {
       setSearchParams({ conv: normalized.id }, { replace: true });
     }
 
+    // Bashkohu ne dhomen e socket-it per kete bisede
     joinConversation(normalized.id);
 
     try {
@@ -153,44 +165,40 @@ export default function Chat() {
     } finally {
       setLoadingMsgs(false);
     }
-  }, [onlineUsers]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // -- Fillon bisede te re nga kerkimi i perdoruesve --
+  // -- Fillon bisede te re nga kerkimi --
 
   const handleStartConversation = useCallback(async (user) => {
     try {
-      // Vendos ?user=username ne URL gjate hapjes se bisedes nga kerkimi
       setSearchParams({ user: user.username }, { replace: true });
-
       const { conversation } = await getOrCreateConversation(user._id);
       setConversations((prev) => {
         const exists = prev.find((c) => c._id === conversation._id);
         return exists ? prev : [conversation, ...prev];
       });
-      // skipUrlUpdate=true sepse URL tashmë eshte vendosur me lart
       handleSelectConv(conversation, true);
     } catch (err) {
       console.error("[Chat] Failed to start conversation:", err);
     }
   }, [handleSelectConv, setSearchParams]);
 
-  // -- Fshin biseden nga lista dhe pastron pamjen nese ishte aktive --
+  // -- Fshin biseden --
 
   const handleDeleteConv = useCallback((convId) => {
     setConversations((prev) => prev.filter((c) => c._id !== convId));
-    if (activeConv?.id === convId) {
+    if (activeConvRef.current?.id === convId) {
       setActiveConv(null);
       setMessages([]);
       setSearchParams({}, { replace: true });
     }
-  }, [activeConv, setSearchParams]);
+  }, [setSearchParams]);
 
-  // -- Dergo mesazh me parashikim optimist (shfaqet menjehere pa pritur backend-in) --
+  // -- Dergo mesazh me parashikim optimist --
 
   async function handleSend(text) {
     if (!activeConv) return;
     try {
-      // Shton mesazhin ne UI menjehere per pergjigje te shpejte
       const optimistic = {
         id:   `opt-${Date.now()}`,
         text,
@@ -198,28 +206,26 @@ export default function Chat() {
         time: new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
       };
       setMessages((prev) => [...prev, optimistic]);
-
-      // Socket do te transmetoje message:new dhe do te zevendesoje mesazhin optimist
       await sendMessage(activeConv.id, text);
     } catch (err) {
       console.error("[Chat] Failed to send message:", err);
+      // Largo mesazhin optimist nese deshtoi dergimi
+      setMessages((prev) => prev.filter((m) => !m.id.startsWith("opt-")));
     }
   }
 
-  // Pasuri bisedat me te dhenat e online status te perdoruesit tjeter
+  // Pasuri bisedat me online status
   const enrichedConversations = conversations.map((c) => {
     const other = c.participants?.find((p) => p._id !== currentUserId) || c.participants?.[0];
     return { ...c, _otherId: other?._id, _online: onlineUsers.has(other?._id) };
   });
 
-  // Kontrollon nese perdoruesi tjeter ne biseden aktive po shkruan
   const isTyping = activeConv
     ? [...typingUsers].some((uid) => uid === activeConv.otherId)
     : false;
 
   return (
     <section className="flex w-full h-screen overflow-hidden" style={{ background: "var(--bg-primary)" }}>
-      {/* Shiriti anësor: lista e bisedave dhe kerkimi */}
       <Sidebar
         activeConv={activeConv}
         conversations={enrichedConversations}
@@ -228,14 +234,12 @@ export default function Chat() {
         onDeleteConv={handleDeleteConv}
         onlineUsers={onlineUsers}
       />
-      {/* Zona kryesore: mesazhet dhe fusha e shkrimit */}
       <div className="flex flex-col flex-1 min-w-0">
         <MessageArea
           activeConv={activeConv}
           messages={messages}
           loading={loadingMsgs}
           isTyping={isTyping}
-          isOnline={activeConv ? onlineUsers.has(activeConv.otherId) : false}
         />
         <ChatInput
           onSend={handleSend}
